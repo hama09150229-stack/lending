@@ -204,20 +204,55 @@
   <div class="history-section" style="margin-top:32px;"><div class="history-title">🎮 当たり履歴</div><div id="admin-win-list"></div></div>
   <div class="history-section" style="margin-top:32px;"><div class="history-title">🎟️ チケット消費履歴</div><div id="admin-ticket-list"></div></div>
 
-  <div class="history-section" style="margin-top:32px;">
-    <div class="history-title">⚙️ 当選確率設定</div>
-    <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px;">
-      <div class="field-wrap" style="margin-bottom:10px;">
-        <label>ミニゲーム当たり確率（%）</label>
-        <input class="input-small" type="number" id="setting-win-prob" min="0" max="100" step="0.1" placeholder="3">
-      </div>
-      <div class="field-wrap" style="margin-bottom:10px;">
-        <label>あみだ抽選 当たり配分メモ（固定: 🚬60% 🥦30% ✒️10%）</label>
-        <div class="input-small" style="color:#555;">変更不可（固定配分）</div>
-      </div>
-      <button class="save-row-btn" onclick="saveSettingsFromUI()">確率を保存</button>
+  <div style="margin-top:32px;">
+    <button class="btn-secondary" style="width:100%;" onclick="goProbScreen()">⚙️ 確率設定画面へ</button>
+  </div>
+</div>
+
+<!-- PROBABILITY SETTINGS SCREEN -->
+<div id="screen-prob" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="showScreen('screen-admin')">‹</button>
+    <div class="screen-title">⚙️ 確率設定</div>
+  </div>
+
+  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+    <div class="add-person-title" style="margin-bottom:10px;">🎮 基本確率</div>
+    <div class="field-wrap" style="margin-bottom:10px;">
+      <label>ミニゲーム基本当選確率（%）</label>
+      <input class="input-small" type="number" id="setting-win-prob" min="0" max="100" step="0.1" placeholder="3">
     </div>
   </div>
+
+  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+    <div class="add-person-title" style="margin-bottom:10px;">🚀 底上げ設定（0%でOFF・演出無視の強制確率）</div>
+    <div class="field-wrap">
+      <label>強制当選確率（%）</label>
+      <input class="input-small" type="number" id="setting-boost-prob" min="0" max="100" step="0.1" placeholder="0">
+    </div>
+  </div>
+
+  <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+    <div class="add-person-title" style="margin-bottom:10px;">🎭 ざわ演出設定</div>
+    <div class="field-wrap" style="margin-bottom:10px;">
+      <label>通常ざわ 出現率（%）</label>
+      <input class="input-small" type="number" id="setting-normal-zawa-rate" min="0" max="100" step="0.1" placeholder="10">
+    </div>
+    <div class="field-wrap" style="margin-bottom:10px;">
+      <label>通常ざわ 当たり率（%）</label>
+      <input class="input-small" type="number" id="setting-normal-zawa-win" min="0" max="100" step="0.1" placeholder="15">
+    </div>
+    <div class="field-wrap" style="margin-bottom:10px;">
+      <label>点滅ざわ 当たり率（%）</label>
+      <input class="input-small" type="number" id="setting-flash-zawa-win" min="0" max="100" step="0.1" placeholder="85">
+    </div>
+    <div class="field-wrap">
+      <label>点滅ざわ ハズレ時の発生率（%）</label>
+      <input class="input-small" type="number" id="setting-flash-zawa-rate" min="0" max="100" step="0.1" placeholder="5">
+    </div>
+  </div>
+
+  <button class="btn-primary" onclick="saveAllSettingsFromUI()">全て保存</button>
 </div>
 
 <!-- GAME OVERLAY -->
@@ -252,7 +287,12 @@ const GAMES = ['slot','amida','wheel','janken'];
 
 let cache = [], historyCache = [], loginCache = [], winCache = [], ticketUsageCache = [];
 let WIN_PROB_RUNTIME = 0.03;
-let LOTTERY_PROB_RUNTIME = null; // あみだ抽選は確率固定なので使わないが設定項目として保持
+let LOTTERY_PROB_RUNTIME = null;
+let BOOST_PROB_RUNTIME = 0; // 0でOFF、演出無視の強制確率
+let NORMAL_ZAWA_RATE = 0.1;
+let NORMAL_ZAWA_WIN = 0.15;
+let FLASH_ZAWA_WIN = 0.85;
+let FLASH_ZAWA_RATE_ON_LOSE = 0.05;
 
 // ── GAS ──
 async function fetchData() { const r=await fetch(`${GAS_URL}?action=getAll`); cache=await r.json(); }
@@ -265,8 +305,28 @@ async function pushLoginLog(name) { const e={date:new Date().toISOString(),name}
 async function pushWin(e) { await fetch(`${GAS_URL}?action=logWin&entry=${encodeURIComponent(JSON.stringify(e))}`); winCache.push(e); renderTicker(); }
 async function pushTicketUsage(e) { await fetch(`${GAS_URL}?action=logTicketUsage&entry=${encodeURIComponent(JSON.stringify(e))}`); ticketUsageCache.push(e); }
 async function fetchTicketUsage() { const r = await fetch(`${GAS_URL}?action=getTicketUsage`); ticketUsageCache = await r.json(); }
-async function fetchSettings() { const r = await fetch(`${GAS_URL}?action=getSettings`); const s = await r.json(); if(s.winProb!==undefined) WIN_PROB_RUNTIME = Number(s.winProb); if(s.lotteryWinProb!==undefined) LOTTERY_PROB_RUNTIME = Number(s.lotteryWinProb); }
-async function pushSettings(winProb, lotteryWinProb) { await fetch(`${GAS_URL}?action=saveSettings&winProb=${winProb}&lotteryWinProb=${lotteryWinProb}`); WIN_PROB_RUNTIME = winProb; LOTTERY_PROB_RUNTIME = lotteryWinProb; }
+async function fetchSettings() {
+  const r = await fetch(`${GAS_URL}?action=getSettings`);
+  const s = await r.json();
+  if(s.winProb!==undefined) WIN_PROB_RUNTIME = Number(s.winProb);
+  if(s.lotteryWinProb!==undefined) LOTTERY_PROB_RUNTIME = Number(s.lotteryWinProb);
+  if(s.boostProb!==undefined) BOOST_PROB_RUNTIME = Number(s.boostProb);
+  if(s.normalZawaRate!==undefined) NORMAL_ZAWA_RATE = Number(s.normalZawaRate);
+  if(s.normalZawaWin!==undefined) NORMAL_ZAWA_WIN = Number(s.normalZawaWin);
+  if(s.flashZawaWin!==undefined) FLASH_ZAWA_WIN = Number(s.flashZawaWin);
+  if(s.flashZawaRateOnLose!==undefined) FLASH_ZAWA_RATE_ON_LOSE = Number(s.flashZawaRateOnLose);
+}
+async function pushAllSettings(settings) {
+  const qs = Object.entries(settings).map(([k,v])=>`${k}=${v}`).join('&');
+  await fetch(`${GAS_URL}?action=saveSettings&${qs}`);
+  WIN_PROB_RUNTIME = settings.winProb;
+  LOTTERY_PROB_RUNTIME = settings.lotteryWinProb;
+  BOOST_PROB_RUNTIME = settings.boostProb;
+  NORMAL_ZAWA_RATE = settings.normalZawaRate;
+  NORMAL_ZAWA_WIN = settings.normalZawaWin;
+  FLASH_ZAWA_WIN = settings.flashZawaWin;
+  FLASH_ZAWA_RATE_ON_LOSE = settings.flashZawaRateOnLose;
+}
 async function clearTickets(id) { await fetchData(); const i=cache.findIndex(p=>String(p.id)===String(id)); if(i===-1)return; cache[i].roulette_tickets=0; await pushData(cache); }
 
 function showToast(m) { const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -643,32 +703,37 @@ function runGames(tickets, name, onDone) {
     function nextGame() {
       if (remaining <= 0) { overlay.classList.add('hidden'); onDone(); return; }
       remaining--;
-      const baseWon = Math.random() < WIN_PROB_RUNTIME;
       const gameType = GAMES[Math.floor(Math.random() * GAMES.length)];
 
+      // 底上げ設定が有効な場合は演出を完全無視して強制確率
+      if (BOOST_PROB_RUNTIME > 0) {
+        const won = Math.random() < BOOST_PROB_RUNTIME;
+        launchGame(gameType, won, name, () => nextGame());
+        return;
+      }
+
+      const baseWon = Math.random() < WIN_PROB_RUNTIME;
+
       // 演出抽選
-      const showNormalZawa = Math.random() < 0.1;   // 10%で通常ざわ
-      const showFlashZawa = !showNormalZawa && (baseWon || Math.random() < 0.05); // 当たり時は必ず、ハズレでも5%
+      const showNormalZawa = Math.random() < NORMAL_ZAWA_RATE;
+      const showFlashZawa = !showNormalZawa && (baseWon || Math.random() < FLASH_ZAWA_RATE_ON_LOSE);
 
       if (showFlashZawa) {
-        // 点滅ざわ → 85%当たり、15%ハズレ
-        const won = Math.random() < 0.85;
+        const won = Math.random() < FLASH_ZAWA_WIN;
         const gameOverlay = document.getElementById('game-overlay');
         gameOverlay.classList.add('hidden');
         showZawa(2500, true, () => {
           gameOverlay.classList.remove('hidden');
-          gameOverlay.style.display = 'flex'; // 確実に表示
+          gameOverlay.style.display = 'flex';
           launchGame(gameType, won, name, () => nextGame());
         });
       } else if (showNormalZawa) {
-        // 通常ざわ → 15%当たり、85%ハズレ
-        const won = Math.random() < 0.15;
+        const won = Math.random() < NORMAL_ZAWA_WIN;
         showZawa(2000, false, () => {
           document.getElementById('game-overlay').style.display = 'flex';
           launchGame(gameType, won, name, () => nextGame());
         });
       } else {
-        // ざわなし → 通常確率
         launchGame(gameType, baseWon, name, () => nextGame());
       }
     }
@@ -1102,12 +1167,30 @@ function renderTicketUsageList() {
   }).join('');
 }
 
-async function saveSettingsFromUI() {
-  const val = document.getElementById('setting-win-prob').value;
-  const prob = Math.min(100, Math.max(0, Number(val)||0)) / 100;
+function goProbScreen() {
+  showScreen('screen-prob');
+  document.getElementById('setting-win-prob').value = (WIN_PROB_RUNTIME*100).toFixed(1);
+  document.getElementById('setting-boost-prob').value = (BOOST_PROB_RUNTIME*100).toFixed(1);
+  document.getElementById('setting-normal-zawa-rate').value = (NORMAL_ZAWA_RATE*100).toFixed(1);
+  document.getElementById('setting-normal-zawa-win').value = (NORMAL_ZAWA_WIN*100).toFixed(1);
+  document.getElementById('setting-flash-zawa-win').value = (FLASH_ZAWA_WIN*100).toFixed(1);
+  document.getElementById('setting-flash-zawa-rate').value = (FLASH_ZAWA_RATE_ON_LOSE*100).toFixed(1);
+}
+
+async function saveAllSettingsFromUI() {
+  const pct = (id) => Math.min(100, Math.max(0, Number(document.getElementById(id).value)||0)) / 100;
+  const settings = {
+    winProb: pct('setting-win-prob'),
+    lotteryWinProb: LOTTERY_PROB_RUNTIME || 0,
+    boostProb: pct('setting-boost-prob'),
+    normalZawaRate: pct('setting-normal-zawa-rate'),
+    normalZawaWin: pct('setting-normal-zawa-win'),
+    flashZawaWin: pct('setting-flash-zawa-win'),
+    flashZawaRateOnLose: pct('setting-flash-zawa-rate'),
+  };
   showToast('保存中...');
-  await pushSettings(prob, LOTTERY_PROB_RUNTIME || 0);
-  showToast('確率を保存しました！ 現在: ' + (prob*100).toFixed(1) + '%');
+  await pushAllSettings(settings);
+  showToast('確率を保存しました！');
 }
 
 function renderWinList() {
