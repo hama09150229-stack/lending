@@ -199,6 +199,22 @@
   <div class="history-section" style="margin-top:32px;"><div class="history-title">金額変更履歴</div><div id="admin-history-list"></div></div>
   <div class="history-section" style="margin-top:32px;"><div class="history-title">ログイン履歴</div><div id="admin-login-list"></div></div>
   <div class="history-section" style="margin-top:32px;"><div class="history-title">🎮 当たり履歴</div><div id="admin-win-list"></div></div>
+  <div class="history-section" style="margin-top:32px;"><div class="history-title">🎟️ チケット消費履歴</div><div id="admin-ticket-list"></div></div>
+
+  <div class="history-section" style="margin-top:32px;">
+    <div class="history-title">⚙️ 当選確率設定</div>
+    <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 16px;">
+      <div class="field-wrap" style="margin-bottom:10px;">
+        <label>ミニゲーム当たり確率（%）</label>
+        <input class="input-small" type="number" id="setting-win-prob" min="0" max="100" step="0.1" placeholder="3">
+      </div>
+      <div class="field-wrap" style="margin-bottom:10px;">
+        <label>あみだ抽選 当たり配分メモ（固定: 🚬60% 🥦30% ✒️10%）</label>
+        <div class="input-small" style="color:#555;">変更不可（固定配分）</div>
+      </div>
+      <button class="save-row-btn" onclick="saveSettingsFromUI()">確率を保存</button>
+    </div>
+  </div>
 </div>
 
 <!-- GAME OVERLAY -->
@@ -231,7 +247,9 @@ const WIN_PROB = 0.03;
 const SLOT_EMOJIS = ['🍋','🍊','🍇','🔔','💎','❌','🍒','⭐'];
 const GAMES = ['slot','amida','wheel','janken'];
 
-let cache = [], historyCache = [], loginCache = [], winCache = [];
+let cache = [], historyCache = [], loginCache = [], winCache = [], ticketUsageCache = [];
+let WIN_PROB_RUNTIME = 0.03;
+let LOTTERY_PROB_RUNTIME = null; // あみだ抽選は確率固定なので使わないが設定項目として保持
 
 // ── GAS ──
 async function fetchData() { const r=await fetch(`${GAS_URL}?action=getAll`); cache=await r.json(); }
@@ -242,7 +260,11 @@ async function pushData(d) { await fetch(`${GAS_URL}?action=save&data=${encodeUR
 async function pushLog(e) { await fetch(`${GAS_URL}?action=log&entry=${encodeURIComponent(JSON.stringify(e))}`); }
 async function pushLoginLog(name) { const e={date:new Date().toISOString(),name}; await fetch(`${GAS_URL}?action=logLogin&entry=${encodeURIComponent(JSON.stringify(e))}`); loginCache.push(e); }
 async function pushWin(e) { await fetch(`${GAS_URL}?action=logWin&entry=${encodeURIComponent(JSON.stringify(e))}`); winCache.push(e); renderTicker(); }
-async function clearTickets(id) { const i=cache.findIndex(p=>String(p.id)===String(id)); if(i===-1)return; cache[i].roulette_tickets=0; await pushData(cache); }
+async function pushTicketUsage(e) { await fetch(`${GAS_URL}?action=logTicketUsage&entry=${encodeURIComponent(JSON.stringify(e))}`); ticketUsageCache.push(e); }
+async function fetchTicketUsage() { const r = await fetch(`${GAS_URL}?action=getTicketUsage`); ticketUsageCache = await r.json(); }
+async function fetchSettings() { const r = await fetch(`${GAS_URL}?action=getSettings`); const s = await r.json(); if(s.winProb!==undefined) WIN_PROB_RUNTIME = Number(s.winProb); if(s.lotteryWinProb!==undefined) LOTTERY_PROB_RUNTIME = Number(s.lotteryWinProb); }
+async function pushSettings(winProb, lotteryWinProb) { await fetch(`${GAS_URL}?action=saveSettings&winProb=${winProb}&lotteryWinProb=${lotteryWinProb}`); WIN_PROB_RUNTIME = winProb; LOTTERY_PROB_RUNTIME = lotteryWinProb; }
+async function clearTickets(id) { await fetchData(); const i=cache.findIndex(p=>String(p.id)===String(id)); if(i===-1)return; cache[i].roulette_tickets=0; await pushData(cache); }
 
 function showToast(m) { const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function showScreen(id) { document.getElementById('screen-top').style.display='none'; document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
@@ -361,11 +383,11 @@ function showWinResult(name, onNext) {
       + '<div style="color:#555;font-size:12px;">スクショを撮ってね 📸</div>';
 
     // 1.5秒後に抽選あみだくじ表示
-    setTimeout(() => showLotteryAmida(ui, onNext), 1500);
+    setTimeout(() => showLotteryAmida(ui, onNext, name), 1500);
   };
 }
 
-function showLotteryAmida(ui, onNext) {
+function showLotteryAmida(ui, onNext, winnerName) {
   const PRIZES = ['🥦','🥦','🚬','🚬','🚬','✒️'];
   const COLS = 6;
   const ROWS = 5;
@@ -481,6 +503,7 @@ function showLotteryAmida(ui, onNext) {
           });
           const prize = goals[col];
           const prizeLabel = prize === '🚬' ? 'タバコ' : prize === '🥦' ? 'ブロッコリー' : 'ペン';
+          pushWin({ date: new Date().toISOString(), name: winnerName, prize });
           setTimeout(() => {
             ui.area.innerHTML = '';
             ui.result.innerHTML = '<span style="font-size:56px;">' + prize + '</span>';
@@ -508,15 +531,33 @@ function showLoseResult(onNext) {
 }
 
 // ── ゲーム起動 ──
-function userStartGame() {
+async function userStartGame() {
   const tickets = window._currentTickets || 0;
   const personId = window._currentPersonId;
   const name = window._currentPersonName;
   if (tickets <= 0) return;
-  showTicketConfirm(tickets, personId, name);
+  showTicketConfirm(tickets, personId, name, async () => {
+    // ゲーム終了後、最新データで画面更新
+    await fetchData();
+    const updated = cache.find(p => String(p.id) === String(personId));
+    if (updated) {
+      document.getElementById('detail-amount').innerHTML = Number(updated.amount||0).toLocaleString()+'<span>円</span>';
+      renderProgress(updated);
+      const newTickets = Number(updated.roulette_tickets)||0;
+      const btnWrap = document.getElementById('user-game-btn-wrap');
+      const ticketCountEl = document.getElementById('user-ticket-count');
+      if (newTickets > 0) {
+        btnWrap.style.display = 'block';
+        ticketCountEl.textContent = '🎟️ ' + newTickets + '枚あります';
+        window._currentTickets = newTickets;
+      } else {
+        btnWrap.style.display = 'none';
+      }
+    }
+  });
 }
 
-function showTicketConfirm(totalTickets, personId, name) {
+function showTicketConfirm(totalTickets, personId, name, onComplete) {
   const overlay = document.getElementById('game-overlay');
   const ui = getUI();
   overlay.classList.remove('hidden');
@@ -528,7 +569,7 @@ function showTicketConfirm(totalTickets, personId, name) {
   ui.sub.innerHTML = '<div style="color:#e8c84a;font-size:18px;font-weight:700;margin-bottom:16px;">' + totalTickets + '枚あります</div>'
     + '<div style="color:#555;font-size:13px;margin-bottom:16px;">何回遊びますか？</div>'
     + '<div style="display:flex;gap:8px;align-items:center;justify-content:center;">'
-    + '<input id="ticket-input" type="number" min="1" max="' + totalTickets + '" value="1" inputmode="numeric" '
+    + '<input id="ticket-input" type="number" min="0" max="' + totalTickets + '" value="1" inputmode="numeric" '
     + 'style="width:80px;background:#1a1a1a;border:1px solid #e8c84a;border-radius:8px;padding:10px;color:#f0f0f0;font-size:18px;font-weight:700;text-align:center;outline:none;">'
     + '<span style="color:#555;font-size:13px;">/ ' + totalTickets + '枚</span>'
     + '</div>';
@@ -537,21 +578,30 @@ function showTicketConfirm(totalTickets, personId, name) {
   ui.actionBtn.classList.remove('hidden');
   ui.actionBtn.onclick = async () => {
     const input = document.getElementById('ticket-input');
-    const use = Math.min(Math.max(1, Number(input.value)||1), totalTickets);
+    const use = Math.min(Math.max(0, Number(input.value)||0), totalTickets);
+
+    if (use <= 0) {
+      overlay.classList.add('hidden');
+      return;
+    }
+
     const remain = totalTickets - use;
 
     ui.actionBtn.classList.add('hidden');
     ui.sub.textContent = 'チケットを消費中...';
 
-    // チケット消費
+    // チケット消費（最新データ取得後に変更）
+    await fetchData();
     const idx = cache.findIndex(p=>String(p.id)===String(personId));
     if(idx!==-1){
-      cache[idx].roulette_tickets = remain;
+      const latestTickets = Number(cache[idx].roulette_tickets)||0;
+      cache[idx].roulette_tickets = Math.max(0, latestTickets - use);
       await pushData(cache);
     }
+    await pushTicketUsage({ date: new Date().toISOString(), name, count: use });
 
     ui.sub.textContent = '';
-    runGames(use, name, ()=>{});
+    runGames(use, name, () => { if (onComplete) onComplete(); });
   };
 
   ui.nextBtn.classList.add('hidden');
@@ -1027,6 +1077,35 @@ function renderLoginList() {
   }).join('');
 }
 
+function renderTicketUsageList() {
+  const el=document.getElementById('admin-ticket-list');
+  if(!ticketUsageCache||ticketUsageCache.length===0){el.innerHTML='<div class="history-empty">なし</div>';return;}
+  const groups={};
+  [...ticketUsageCache].reverse().forEach(h=>{if(!groups[h.name])groups[h.name]=[];groups[h.name].push(h);});
+  el.innerHTML=Object.entries(groups).map(([name,records])=>{
+    const total = records.reduce((s,r)=>s+(Number(r.count)||0),0);
+    const rows=records.map(h=>`<div style="padding:8px 0;border-bottom:1px solid #181818;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:11px;color:#444;">${formatDate(h.date)}</div>
+      <div style="font-size:14px;color:#e8c84a;font-weight:700;">🎟️ ${h.count}枚使用</div>
+    </div>`).join('');
+    return `<div class="history-item">
+      <div class="history-item-header" onclick="toggleHistory(this)">
+        <div style="font-size:14px;font-weight:700;">${name} <span style="font-size:11px;color:#555;font-weight:400;">計${total}枚消費</span></div>
+        <span class="chevron">›</span>
+      </div>
+      <div class="history-item-body">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+async function saveSettingsFromUI() {
+  const val = document.getElementById('setting-win-prob').value;
+  const prob = Math.min(100, Math.max(0, Number(val)||0)) / 100;
+  showToast('保存中...');
+  await pushSettings(prob, LOTTERY_PROB_RUNTIME || 0);
+  showToast('確率を保存しました！ 現在: ' + (prob*100).toFixed(1) + '%');
+}
+
 function renderWinList() {
   const el=document.getElementById('admin-win-list');
   if(!winCache||winCache.length===0){el.innerHTML='<div class="history-empty">なし</div>';return;}
@@ -1083,7 +1162,7 @@ async function goUserSelect() {
   document.getElementById('user-pw').value='';
   document.getElementById('user-error').textContent='';
   showToast('取得中...');
-  try { await fetchData(); } catch(e) { document.getElementById('user-error').textContent='通信エラー'; return; }
+  try { await Promise.all([fetchData(), fetchSettings()]); } catch(e) { document.getElementById('user-error').textContent='通信エラー'; return; }
   const sel=document.getElementById('user-select');
   sel.innerHTML='<option value="">-- 選択 --</option>';
   cache.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o);});
@@ -1208,6 +1287,7 @@ async function saveRow(id){
 }
 
 async function addCharge(id){
+  await fetchData(); // 最新データを取得してから変更
   const idx=cache.findIndex(p=>String(p.id)===String(id));
   if(idx===-1)return;
   const amount=Number(document.getElementById('charge-'+id).value)||0;
@@ -1227,6 +1307,7 @@ async function addCharge(id){
 
 async function confiscateTickets(id, name) {
   if (!confirm(name + 'のチケットを没収しますか？')) return;
+  await fetchData();
   const idx = cache.findIndex(p => String(p.id) === String(id));
   if (idx === -1) return;
   cache[idx].roulette_tickets = 0;
