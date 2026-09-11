@@ -110,6 +110,9 @@
   .zawa-overlay.hidden { display: none; }
   .zawa-overlay.flash { animation: zawaFlash 0.15s linear infinite; }
   @keyframes zawaFlash { 0%{background:#000} 49%{background:#000} 50%{background:#fff} 99%{background:#fff} 100%{background:#000} }
+  .zawa-overlay.shake { animation: zawaShake 0.1s linear infinite; }
+  @keyframes zawaShake { 0%{transform:translate(0,0)} 25%{transform:translate(-4px,3px)} 50%{transform:translate(3px,-4px)} 75%{transform:translate(-3px,-3px)} 100%{transform:translate(0,0)} }
+  .zawa-overlay.flash.shake { animation: zawaFlash 0.15s linear infinite, zawaShake 0.1s linear infinite; }
   .zawa-text { position: absolute; font-weight: 900; font-family: "Hiragino Kaku Gothic ProN", sans-serif; opacity: 0; animation: zawaFade 1.2s ease-in-out forwards; pointer-events: none; }
   .zawa-overlay.flash .zawa-text { color: #000; }
   .zawa-overlay:not(.flash) .zawa-text { color: #fff; }
@@ -278,6 +281,7 @@ function showZawa(duration, flash, onDone) {
   const audio = document.getElementById('zawa-audio');
   overlay.innerHTML = '';
   overlay.classList.remove('hidden');
+  overlay.classList.add('shake');
   if (flash) overlay.classList.add('flash'); else overlay.classList.remove('flash');
   audio.currentTime = 0;
   audio.play().catch(()=>{});
@@ -298,6 +302,7 @@ function showZawa(duration, flash, onDone) {
     clearInterval(timer);
     audio.pause(); audio.currentTime = 0;
     overlay.classList.remove('flash');
+    overlay.classList.remove('shake');
     overlay.classList.add('hidden');
     overlay.innerHTML = '';
     onDone();
@@ -638,7 +643,7 @@ function runGames(tickets, name, onDone) {
     function nextGame() {
       if (remaining <= 0) { overlay.classList.add('hidden'); onDone(); return; }
       remaining--;
-      const baseWon = Math.random() < WIN_PROB;
+      const baseWon = Math.random() < WIN_PROB_RUNTIME;
       const gameType = GAMES[Math.floor(Math.random() * GAMES.length)];
 
       // 演出抽選
@@ -680,7 +685,6 @@ function _launchGameInner(type, won, name, onDone) {
   // 当たり/ハズレ後の共通処理
   function onResult(isWon) {
     if (isWon) {
-      pushWin({ date: new Date().toISOString(), name });
       showWinResult(name, onDone);
     } else {
       showLoseResult(onDone);
@@ -739,7 +743,7 @@ function launchAmida(won, onResult) {
 
   // ハズレ演出バリエーション（ハズレ時のみ）
   // 0: 当たりだらけ（当たり3、ハズレ1）, 1: ハズレだらけ（当たり1、ハズレ3）, 2: 普通（当たり1、ハズレ3）
-  const missType = won ? -1 : Math.floor(Math.random() * 3);
+  const missType = won ? -1 : (Math.random() < 0.6 ? 0 : Math.floor(Math.random() * 2) + 1); // 60%で当たりだらけ演出
 
   // 横棒生成
   const bars = [];
