@@ -115,6 +115,14 @@
   .zawa-overlay:not(.flash) .zawa-text { color: #fff; }
   @keyframes zawaFade { 0%{opacity:0;transform:scale(0.8)} 30%{opacity:1;transform:scale(1)} 70%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.1)} }
 
+  /* 流れるアナウンス */
+  .ticker-wrap { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: rgba(13,13,13,0.92); border-bottom: 1px solid #2a2a2a; height: 32px; overflow: hidden; }
+  .ticker-wrap.hidden { display: none; }
+  .ticker-inner { display: flex; align-items: center; height: 100%; white-space: nowrap; animation: tickerScroll linear infinite; }
+  .ticker-inner:hover { animation-play-state: paused; }
+  @keyframes tickerScroll { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } }
+  .ticker-item { font-size: 11px; color: #e8c84a; margin-right: 48px; letter-spacing: 0.5px; }
+
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #e8c84a; color: #0d0d0d; padding: 10px 22px; border-radius: 20px; font-size: 13px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity 0.2s; white-space: nowrap; z-index: 999; }
   .toast.show { opacity: 1; }
   .win-badge { display: inline-block; background: #e8c84a; color: #0d0d0d; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
@@ -142,7 +150,7 @@
   </div>
 </div>
 
-<div id="screen-user-detail" class="screen">
+<div id="screen-user-detail" class="screen" style="padding-top:56px;">
   <div class="screen-header"><button class="back-btn" onclick="goUserSelect()">‹</button><div class="screen-title">残高</div></div>
   <div class="detail-hero">
     <div class="detail-name" id="detail-name">NAME</div>
@@ -155,6 +163,10 @@
       <div class="progress-label-amount" id="progress-amount-label">0 / 2,000円</div>
     </div>
     <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
+  </div>
+  <div id="user-game-btn-wrap" style="margin-top:16px;display:none;">
+    <button class="btn-primary" id="user-game-btn" onclick="userStartGame()">🎟️ ゲームする</button>
+    <div style="text-align:center;margin-top:6px;font-size:12px;color:#555;" id="user-ticket-count"></div>
   </div>
   <div class="history-section"><div class="history-title">履歴</div><div id="user-history-list"></div></div>
 </div>
@@ -199,6 +211,11 @@
   <button class="game-next-btn hidden" id="game-next-btn">次へ</button>
 </div>
 
+<!-- 流れるアナウンス -->
+<div class="ticker-wrap hidden" id="ticker-wrap">
+  <div class="ticker-inner" id="ticker-inner"></div>
+</div>
+
 <!-- ZAWA -->
 <div class="zawa-overlay hidden" id="zawa-overlay"></div>
 <audio id="zawa-audio" src="zawa.mp3" loop></audio>
@@ -224,7 +241,7 @@ async function fetchWins() { const r=await fetch(`${GAS_URL}?action=getWins`); w
 async function pushData(d) { await fetch(`${GAS_URL}?action=save&data=${encodeURIComponent(JSON.stringify(d))}`); cache=d; }
 async function pushLog(e) { await fetch(`${GAS_URL}?action=log&entry=${encodeURIComponent(JSON.stringify(e))}`); }
 async function pushLoginLog(name) { const e={date:new Date().toISOString(),name}; await fetch(`${GAS_URL}?action=logLogin&entry=${encodeURIComponent(JSON.stringify(e))}`); loginCache.push(e); }
-async function pushWin(e) { await fetch(`${GAS_URL}?action=logWin&entry=${encodeURIComponent(JSON.stringify(e))}`); winCache.push(e); }
+async function pushWin(e) { await fetch(`${GAS_URL}?action=logWin&entry=${encodeURIComponent(JSON.stringify(e))}`); winCache.push(e); renderTicker(); }
 async function clearTickets(id) { const i=cache.findIndex(p=>String(p.id)===String(id)); if(i===-1)return; cache[i].roulette_tickets=0; await pushData(cache); }
 
 function showToast(m) { const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -290,8 +307,14 @@ function resetUI(titleText) {
 function showNextBtn(onNext) {
   const btn = document.getElementById('game-next-btn');
   document.getElementById('game-action-btn').classList.add('hidden');
+  // 古いonclickを必ずクリア
+  btn.onclick = null;
   btn.classList.remove('hidden');
-  btn.onclick = () => { btn.classList.add('hidden'); onNext(); };
+  btn.onclick = () => {
+    btn.onclick = null;
+    btn.classList.add('hidden');
+    onNext();
+  };
 }
 
 // ── 当たり演出 ──
@@ -299,6 +322,8 @@ function showWinResult(name, onNext) {
   const ui = getUI();
   ui.actionBtn.classList.add('hidden');
   ui.nextBtn.classList.add('hidden');
+  // 全ボタン無効化
+  document.querySelectorAll('.game-overlay button').forEach(b => { b.disabled = true; });
 
   // BGM
   const bgm = document.getElementById('bgm-audio');
@@ -316,12 +341,16 @@ function showWinResult(name, onNext) {
   video.style.cssText = 'width:100%;max-width:340px;border-radius:12px;';
   ui.area.appendChild(video);
 
+  video.onended = () => showResult();
+  video.onerror = () => showResult();
+
   // 動画再生失敗またはタイムアウト時のフォールバック
   const fallbackTimer = setTimeout(() => showResult(), 4000);
 
   function showResult() {
     clearTimeout(fallbackTimer);
     video.onended = null;
+    video.onerror = null;
     bgm.pause(); bgm.currentTime = 0;
     ui.area.innerHTML = '';
 
@@ -458,6 +487,8 @@ function showLotteryAmida(ui, onNext) {
             ui.sub.innerHTML = '<div style="color:#e8c84a;font-size:18px;font-weight:700;margin-bottom:8px;">' + prizeLabel + '</div>'
               + '<div style="color:#e8c84a;font-size:13px;margin-bottom:8px;">' + nowStr() + '</div>'
               + '<div style="color:#555;font-size:12px;">スクショを撮ってね 📸</div>';
+            // ボタンを有効化してから次へを表示
+            document.querySelectorAll('.game-overlay button').forEach(b => { b.disabled = false; });
             showNextBtn(onNext);
           }, 800);
         }
@@ -477,6 +508,14 @@ function showLoseResult(onNext) {
 }
 
 // ── ゲーム起動 ──
+function userStartGame() {
+  const tickets = window._currentTickets || 0;
+  const personId = window._currentPersonId;
+  const name = window._currentPersonName;
+  if (tickets <= 0) return;
+  showTicketConfirm(tickets, personId, name);
+}
+
 function showTicketConfirm(totalTickets, personId, name) {
   const overlay = document.getElementById('game-overlay');
   const ui = getUI();
@@ -648,6 +687,10 @@ function launchAmida(won, onResult) {
   const colX = [40, 100, 180, 240];
   const rowH = H / (ROWS + 1);
 
+  // ハズレ演出バリエーション（ハズレ時のみ）
+  // 0: 当たりだらけ（当たり3、ハズレ1）, 1: ハズレだらけ（当たり1、ハズレ3）, 2: 普通（当たり1、ハズレ3）
+  const missType = won ? -1 : Math.floor(Math.random() * 3);
+
   // 横棒生成
   const bars = [];
   for (let row = 0; row < ROWS; row++) {
@@ -670,13 +713,29 @@ function launchAmida(won, onResult) {
 
   // 当たりゴールをランダムに決定
   const winGoal = Math.floor(Math.random() * COLS);
-  // 当たりスタート（winGoalに到達するスタート）
-  // 必ず1つは存在するよう保証（到達するスタートがなければ強制的に割り当て）
+
+  // 当たりスタートを保証
   let winStart = parseInt(Object.keys(destMap).find(k => destMap[k] === winGoal));
   if (isNaN(winStart)) {
-    // winGoalに到達するスタートがない → ランダムに1つ選んでdestMapを上書き
     winStart = Math.floor(Math.random() * COLS);
     destMap[winStart] = winGoal;
+  }
+
+  // ゴール配置を演出タイプで変える
+  // missType 0: 当たりだらけ（3つ当たり、1つハズレ）→ won=falseでも当たりに見える
+  // missType 1,2: 普通（1つ当たり、3つハズレ）
+  let goalDisplay; // 各ゴールの表示
+  if (won) {
+    goalDisplay = Array(COLS).fill('✕');
+    goalDisplay[winGoal] = '🎊';
+  } else if (missType === 0) {
+    // 当たりだらけ演出（3つ🎊、1つ✕）
+    goalDisplay = Array(COLS).fill('🎊');
+    goalDisplay[winGoal] = '✕'; // winGoalだけハズレ（当たりのゴールがハズレに見える）
+  } else {
+    // 普通
+    goalDisplay = Array(COLS).fill('✕');
+    goalDisplay[winGoal] = '🎊';
   }
 
   ui.area.innerHTML = `
@@ -992,6 +1051,30 @@ function renderWinList() {
   }).join('');
 }
 
+// ── 流れるアナウンス ──
+function renderTicker() {
+  const wrap = document.getElementById('ticker-wrap');
+  const inner = document.getElementById('ticker-inner');
+  if (!winCache || winCache.length === 0) { wrap.classList.add('hidden'); return; }
+
+  // 直近5件
+  const recent = [...winCache].reverse().slice(0, 5);
+  const prizeLabel = p => p === '🚬' ? 'タバコ' : p === '🥦' ? 'ブロッコリー' : p === '✒️' ? 'ペン' : '当選';
+
+  const text = recent.map(h => {
+    const d = new Date(h.date);
+    const timeStr = (d.getMonth()+1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    return '🎉 ' + h.name + ' が ' + timeStr + ' に ' + (h.prize||'🎊') + ' ' + prizeLabel(h.prize) + ' 当選！';
+  }).join('　　　');
+
+  inner.textContent = text;
+  wrap.classList.remove('hidden');
+
+  // テキスト長に応じてアニメーション速度調整
+  const duration = Math.max(12, text.length * 0.18);
+  inner.style.animationDuration = duration + 's';
+}
+
 // ── USER FLOW ──
 async function goUserSelect() {
   document.getElementById('screen-top').style.display='none';
@@ -1023,10 +1106,24 @@ async function userLogin() {
   showToast('履歴取得中...');
   await fetchHistory();
   renderHistoryList('user-history-list', historyCache.filter(h=>h.name===person.name));
+  // 当たり履歴取得してticker表示
+  fetchWins().then(() => renderTicker());
+
   const tickets=Number(person.roulette_tickets)||0;
-  if(tickets>0) setTimeout(()=>{
-    showTicketConfirm(tickets, person.id, person.name);
-  },800);
+
+  // チケットボタン表示
+  const btnWrap = document.getElementById('user-game-btn-wrap');
+  const ticketCountEl = document.getElementById('user-ticket-count');
+  if (tickets > 0) {
+    btnWrap.style.display = 'block';
+    ticketCountEl.textContent = '🎟️ ' + tickets + '枚あります';
+    // チケット情報を保存
+    window._currentPersonId = person.id;
+    window._currentPersonName = person.name;
+    window._currentTickets = tickets;
+  } else {
+    btnWrap.style.display = 'none';
+  }
 }
 
 // ── ADMIN FLOW ──
